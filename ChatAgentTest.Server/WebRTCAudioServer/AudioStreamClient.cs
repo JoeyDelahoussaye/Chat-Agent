@@ -1,15 +1,14 @@
-﻿using NAudio.Wave;
+﻿using ChatAgentTest.Server.WebRTCAudioServer;
+using NAudio.Wave;
 using Newtonsoft.Json.Linq;
 using System.Collections.Concurrent;
 using System.Net.WebSockets;
 using System.Text;
-using System.Text.Json;
 
 public class AudioStreamClient
 {
     private readonly ClientWebSocket _client;
     private bool _isConnected = false;
-    private string _sessionId = "";
     private const string OpenAiRealtimeApiUrl = "wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-12-17";
     private const string OpenAiApiKey = "";
     private static bool isPlayingAudio = false;
@@ -23,9 +22,12 @@ public class AudioStreamClient
     private static WaveFileWriter? waveFileWriter;
     private static readonly string outputFilePath = "recordedAudio.wav";
 
-    public AudioStreamClient()
+    private readonly AvailabilityService _availabilityService;
+
+    public AudioStreamClient(HttpClient httpClient)
     {
         _client = new ClientWebSocket();
+        _availabilityService = new AvailabilityService(httpClient, OpenAiApiKey);
         bufferedWaveProvider = new BufferedWaveProvider(new WaveFormat(24000, 16, 1))
         {
             BufferDuration = TimeSpan.FromSeconds(5),
@@ -115,8 +117,6 @@ public class AudioStreamClient
             Console.WriteLine("Recording resumed after audio playback.");
         }
     }
-   
-   
 
     private static async Task WriteToTextFile(string text)
     {
@@ -222,7 +222,7 @@ public class AudioStreamClient
         }
     }
 
-    private void HandleFunctionCall(JObject json)
+    private async Task HandleFunctionCall(JObject json)
     {
         try
         {
@@ -234,15 +234,20 @@ public class AudioStreamClient
                 var functionCallArgs = JObject.Parse(arguments);
                 switch (name)
                 {
-                    case "get_weather":
-                        var city = functionCallArgs["city"]?.ToString();
-                        if (!string.IsNullOrEmpty(city))
+                    case "get_availability":
+                        var floorplan = functionCallArgs["floorplan"]?.ToString();
+                        var dateRange = functionCallArgs["date_range"]?.ToString();
+                        var assistantId = "asst_xkOQapXq9PKWq5Jv4E99JZVD"; 
+
+                        if (!string.IsNullOrEmpty(floorplan) && !string.IsNullOrEmpty(dateRange))
                         {
-                            Console.WriteLine("CALLING WEATHER FUNCTION");
+                            Console.WriteLine("Calling availability function...");
+                            var availability = await _availabilityService.GetAvailabilityAsync(assistantId, floorplan, dateRange);
+                            Console.WriteLine($"Availability response: {availability}");
                         }
                         else
                         {
-                            Console.WriteLine("City not provided for get_weather function.");
+                            Console.WriteLine("Arguments not provided for get_availability function.");
                         }
                         break;
 
@@ -360,20 +365,37 @@ public class AudioStreamClient
                         new JObject
                         {
                             ["type"] = "function",
-                            ["name"] = "get_weather",
-                            ["description"] = "Get current weather for a specified city",
+                            ["name"] = "get_availability",
+                            ["description"] = "Get current availability for a specified floorplan",
                             ["parameters"] = new JObject
                             {
                                 ["type"] = "object",
                                 ["properties"] = new JObject
                                 {
-                                    ["city"] = new JObject
+                                    ["floorplan"] = new JObject
                                     {
                                         ["type"] = "string",
-                                        ["description"] = "The name of the city for which to fetch the weather."
+                                        ["description"] = "The name of the floorplan for which to fetch the availability."
+                                    },
+                                    ["date_range"] =  new JObject
+                                    {
+                                        ["type"] = "object",
+                                        ["required"] = new JArray("start_date", "end_date"),
+                                        ["properties"] = new JObject {
+                                            ["start_date"] = new JObject {
+                                                ["type"] = "string",
+                                                ["format"] = "date",
+                                                ["description"] = "The start date for the availability check in YYYY-MM-DD format."
+                                            },
+                                            ["end_date"] = new JObject {
+                                                ["type"] = "string",
+                                                ["format"] = "date",
+                                                ["description"] = "The end date for the availability check in YYYY-MM-DD format."
+                                            }
+                                        },
                                     }
                                 },
-                                ["required"] = new JArray("city")
+                                ["required"] = new JArray("floorplan, date_range")
                             }
                         },
                         new JObject
