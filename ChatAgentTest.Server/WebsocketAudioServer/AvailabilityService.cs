@@ -2,7 +2,7 @@
 using System.Text;
 using System.Text.Json;
 
-namespace ChatAgentTest.Server.WebRTCAudioServer
+namespace ChatAgentTest.Server.WebsocketAudioServer
 {
     public class AvailabilityService
     {
@@ -19,8 +19,15 @@ namespace ChatAgentTest.Server.WebRTCAudioServer
 
         public async Task<string?> GetAvailabilityAsync(string assistantId, string floorplan, string dateRange)
         {
+            // TODO remove this temp for dev
+            return "Sorry, the catalina is all booked up";
+
             // Create a thread
             var threadId = await CreateThreadAsync();
+            if (string.IsNullOrEmpty(threadId))
+            {
+                return null;
+            }
 
             // Create a message
             var message = await CreateMessageAsync(threadId, $"Check availability for floorplan {floorplan} on {dateRange}.");
@@ -54,9 +61,8 @@ namespace ChatAgentTest.Server.WebRTCAudioServer
 
             var messagesJson = JsonDocument.Parse(await messagesResponse.Content.ReadAsStringAsync());
             var messages = messagesJson.RootElement.GetProperty("data").EnumerateArray().ToArray();
-            var lastMessage = messages.Last().GetProperty("content").EnumerateArray().First().GetProperty("text").GetProperty("value").GetString();
-
-            return lastMessage;
+            var firstMessage = messages.First().GetProperty("content").EnumerateArray().First().GetProperty("text").GetProperty("value").GetString();
+            return firstMessage;
         }
 
         public async Task<string?> CreateThreadAsync()
@@ -68,7 +74,7 @@ namespace ChatAgentTest.Server.WebRTCAudioServer
                 }
             };
 
-            var requestJson = JsonSerializer.Serialize(requestBody);
+            var requestJson = JsonSerializer.Serialize(requestBody, JsonOptions.SnakeCase);
             var requestContent = new StringContent(requestJson, Encoding.UTF8, "application/json");
 
             using var request = new HttpRequestMessage(HttpMethod.Post, "https://api.openai.com/v1/threads")
@@ -87,6 +93,7 @@ namespace ChatAgentTest.Server.WebRTCAudioServer
             var jsonResponse = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
             return jsonResponse.RootElement.GetProperty("id").GetString();
         }
+
         public async Task<string?> CreateMessageAsync(string threadId, string message)
         {
             var requestBody = new
@@ -102,7 +109,7 @@ namespace ChatAgentTest.Server.WebRTCAudioServer
                 }
             };
 
-            var requestJson = JsonSerializer.Serialize(requestBody);
+            var requestJson = JsonSerializer.Serialize(requestBody, JsonOptions.SnakeCase);
             var requestContent = new StringContent(requestJson, Encoding.UTF8, "application/json");
 
             using var request = new HttpRequestMessage(HttpMethod.Post, $"https://api.openai.com/v1/threads/{threadId}/messages")
@@ -124,14 +131,8 @@ namespace ChatAgentTest.Server.WebRTCAudioServer
 
         public async Task<string?> CreateRunAsync(string assistantId, string threadId)
         {
-            var listAssistantsResponse = await _httpClient.GetAsync("https://api.openai.com/v1/assistants");
-            var listAssistantsResponseText = await listAssistantsResponse.Content.ReadAsStringAsync();
-
-            var checkAssistantResponse = await _httpClient.GetAsync($"https://api.openai.com/v1/assistants/{assistantId}");
-            var responseText = await checkAssistantResponse.Content.ReadAsStringAsync();
-
             var requestBody = new { assistant_id = assistantId };
-            var runRequest = new StringContent(JsonSerializer.Serialize(requestBody), Encoding.UTF8, "application/json");
+            var runRequest = new StringContent(JsonSerializer.Serialize(requestBody, JsonOptions.SnakeCase), Encoding.UTF8, "application/json");
 
             using var request = new HttpRequestMessage(HttpMethod.Post, $"https://api.openai.com/v1/threads/{threadId}/runs")
             {
@@ -149,5 +150,19 @@ namespace ChatAgentTest.Server.WebRTCAudioServer
             var runJson = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
             return runJson.RootElement.GetProperty("id").GetString()!;
         }
+
+        //public async Task<string?> CreateAssistantAsync(CreateAssistantRequest dto)
+        //{
+        //    var jsonContent = JsonSerializer.Serialize(dto, JsonOptions.SnakeCase);
+        //    var content = new StringContent(jsonContent, Encoding.UTF8, "application/json");
+
+        //    var response = await _httpClient.PostAsync("https://api.openai.com/v1/assistants", content);
+        //    if (!response.IsSuccessStatusCode)
+        //        return null;
+
+        //    var jsonResponse = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        //    return jsonResponse.RootElement.GetProperty("id").GetString();
+        //}
     }
 }
+
